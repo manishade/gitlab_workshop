@@ -1,4 +1,4 @@
-FROM remote-docker.artifactory.swisscom.com/python:3.7.0-slim
+FROM remote-docker.artifactory.swisscom.com/python:3.8-slim
 WORKDIR /opt
 COPY requirements.txt .
 COPY tests .

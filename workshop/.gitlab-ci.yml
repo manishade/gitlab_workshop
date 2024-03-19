@@ -1,6 +1,8 @@
 stages:
   - build
+  - test
   - clean
+  - release
 
 include:
   - template: Security/Container-Scanning.gitlab-ci.yml
@@ -8,6 +10,7 @@ include:
 variables:
   CI_REGISTRY: sre-gettogether-docker-repo-docker-local.artifactory.swisscom.com
   CI_REGISTRY_IMAGE: sre-gettogether-docker-image
+  CI_REGISTRY_USER: sa-pf00-artifactory2
   # Your branch name <your_location>/<your_user> is populated in the GitLab var CI_COMMIT_REF_NAME
   # This enables you to release the built docker image in the artifactory with the correct hirerachy 
   #eg. sre-gettogether-docker-repo-docker-local.artifactory.swisscom.com/bern/taaxxxx
@@ -111,10 +114,10 @@ retag-docker-image:
     name: sema-5gc-docker-local.artifactory.swisscom.com/kaniko-crane-container:latest
     entrypoint: ['']
   script:
+    - crane auth login -u "${CI_REGISTRY_USER}" -p "${CI_REGISTRY_PASSWORD}" "${CI_REGISTRY}"
     - crane tag ${DOCKER_IMAGE_NAME}:${CI_COMMIT_SHORT_SHA} latest
     - echo "Image pushed successfully to ${DOCKER_IMAGE_NAME}:latest"
   needs:
     - job: scanning_results
     - job: unit-tests
   when: on_success
-
