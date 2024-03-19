@@ -1,0 +1,101 @@
+stages:
+  - build
+  - test
+  - clean
+  - release
+
+include:
+  - template: Security/Container-Scanning.gitlab-ci.yml
+
+variables:
+  CI_REGISTRY: sre-gettogether-docker-repo-docker-local.artifactory.swisscom.com
+  CI_REGISTRY_IMAGE: sre-gettogther-flask-app
+  CI_REGISTRY_USER: sa-pf00-artifactory2 
+  DOCKER_IMAGE_URL: ${CI_REGISTRY}/${CI_REGISTRY_IMAGE}
+
+# Build
+# -----
+build-docker-image:
+  stage: build
+  image:
+    name: gcr-docker-remote.artifactory.swisscom.com/kaniko-project/executor:v1.19.2-debug
+    entrypoint: ['']
+  script:
+    # Build  the image from the Dockerfile at the root of the project.
+    - /kaniko/executor
+      --context $CONTEXT
+      --dockerfile ${DOCKERFILE_PATH}
+      --destination ${DOCKER_IMAGE_NAME}     
+    - 'echo "Image built successfully. Temporary Docker Container ${DOCKER_IMAGE_NAME} Uploaded to Artifactory"'
+  variables:
+    DOCKER_IMAGE_NAME: ${DOCKER_IMAGE_URL}:${CI_COMMIT_SHORT_SHA}
+    DOCKERFILE_PATH: Dockerfile
+    CONTEXT: "."
+
+# Container scanning
+container_scanning:
+  stage: test
+  variables:
+    CS_IMAGE: ${DOCKER_IMAGE_URL}:${CI_COMMIT_SHORT_SHA}
+    CS_SEVERITY_THRESHOLD: HIGH      
+    SECURE_LOG_LEVEL: debug
+  allow_failure: false
+  needs:
+    - job: build-docker-image
+  when: on_success
+
+# Test
+# -----
+test-docker-image:
+  stage: test
+  services:
+    - name: ${DOCKER_IMAGE_URL}:${CI_COMMIT_SHORT_SHA}
+      alias: flask
+  image: remote-docker.artifactory.swisscom.com/python:3.7.2
+  script:
+    - echo "Test the flask application"
+    - curl http://flask:5000/
+  variables:
+    DOCKER_IMAGE_NAME: ${DOCKER_IMAGE_URL}:${CI_COMMIT_SHORT_SHA}
+  needs:
+    - job: build-docker-image
+    - job: container_scanning
+  when: on_success
+
+
+# Clean up temporary images
+# -----
+clean-temporary-docker-images:
+  stage: clean
+  image:
+    name: sema-5gc-docker-local.artifactory.swisscom.com/kaniko-crane-container:latest
+    entrypoint: [ '' ]
+  script:
+    - crane auth login -u "${CI_REGISTRY_USER}" -p "${CI_REGISTRY_PASSWORD}" "${CI_REGISTRY}"
+    - crane delete ${DOCKER_IMAGE_NAME}
+    - echo "Temporary image ${DOCKER_IMAGE_NAME} Successfully deleted"
+  variables:
+    DOCKER_IMAGE_NAME: ${DOCKER_IMAGE_URL}:${CI_COMMIT_SHORT_SHA}
+  needs:
+    - job: test-docker-image
+  when: on_failure
+
+# Release to Artifactory
+# -----
+retag-docker-image:
+  stage: release
+  image:
+    name: sema-5gc-docker-local.artifactory.swisscom.com/kaniko-crane-container:latest
+    entrypoint: ['']
+  script:
+    - crane auth login -u "${CI_REGISTRY_USER}" -p "${CI_REGISTRY_PASSWORD}" "${CI_REGISTRY}"
+    - crane tag ${DOCKER_IMAGE_NAME} latest
+    - echo "Image ${DOCKER_IMAGE_NAME} tagged as latest"
+  variables:
+    DOCKER_IMAGE_NAME: ${DOCKER_IMAGE_URL}:${CI_COMMIT_SHORT_SHA}
+  needs:
+    - job: "build-docker-image" #do we need this?
+      artifacts: true
+    - job: "test-docker-image"
+  when: on_success
+

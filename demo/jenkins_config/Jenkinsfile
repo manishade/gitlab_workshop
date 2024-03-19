@@ -1,0 +1,31 @@
+pipeline
+{
+    agent any //does this by default use the docker agent
+    environment{
+        ARTIFACTORY_DOCKER_HUB = "sre-gettogether-docker-repo-docker-local.artifactory.swisscom.com"
+    }
+    stages{
+        stage ('build flask app docker image'){
+            steps{
+                script{
+                    sh 'make build'
+
+                }
+            }
+        }
+
+        stage('Deploy to artifactory'){
+            steps{
+                script{
+                    sh 'make push'
+                }
+            }
+        }
+    }
+      post {
+        always {
+            deleteDir()
+            cleanWs()
+        }
+  }
+}
