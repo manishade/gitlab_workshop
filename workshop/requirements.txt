@@ -1,0 +1,7 @@
+lxml==4.9.2
+requests
+jsonmerge
+pytest
+pytest-cov
+pytest-ordering
+coverage

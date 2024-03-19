@@ -1,0 +1,120 @@
+stages:
+  - build
+  - clean
+
+include:
+  - template: Security/Container-Scanning.gitlab-ci.yml
+
+variables:
+  CI_REGISTRY: sre-gettogether-docker-repo-docker-local.artifactory.swisscom.com
+  CI_REGISTRY_IMAGE: sre-gettogether-docker-image
+  # Your branch name <your_location>/<your_user> is populated in the GitLab var CI_COMMIT_REF_NAME
+  # This enables you to release the built docker image in the artifactory with the correct hirerachy 
+  #eg. sre-gettogether-docker-repo-docker-local.artifactory.swisscom.com/bern/taaxxxx
+  ARTIFACTORY_SUFFIX: /${CI_COMMIT_REF_NAME}
+  DOCKER_IMAGE_NAME: ${CI_REGISTRY}${ARTIFACTORY_SUFFIX}/${CI_REGISTRY_IMAGE}
+
+# Build
+# -----
+build-docker-image:
+  stage: build
+  image:
+    name: gcr-docker-remote.artifactory.swisscom.com/kaniko-project/executor:v1.19.2-debug
+    entrypoint: ['']
+  script:
+    # Build  the image from the Dockerfile at the root of the project.
+    # Use CI_REGISTRY_USER sa-pf00-artifactory2 Variable. Find the best location.
+    # Kaniko Reads Default Environment Variables automatically
+    - /kaniko/executor
+      --context $CONTEXT
+      --dockerfile ${DOCKERFILE_PATH}
+      --destination ${DOCKER_IMAGE_NAME}:${CI_COMMIT_SHORT_SHA}
+    - 'echo "Image built successfully. Temporary Docker Container ${DOCKER_IMAGE_NAME}:${CI_COMMIT_SHORT_SHA} Uploaded to Artifactory"'
+  variables:
+    DOCKERFILE_PATH: Dockerfile
+    CONTEXT: "."
+
+# Test
+# -----
+## include Container Scanning
+container_scanning:
+  stage: test
+  variables:
+    CS_IMAGE: ${CI_REGISTRY}${ARTIFACTORY_SUFFIX}/${CI_REGISTRY_IMAGE}:${CI_COMMIT_SHORT_SHA}
+    CS_SEVERITY_THRESHOLD: HIGH      
+    SECURE_LOG_LEVEL: debug
+  allow_failure: false
+  artifacts:
+    reports:
+      container_scanning: gl-container-scanning-report.json
+    paths:
+      # Required to pass the results to the result stage
+      - gl-container-scanning-report.json
+  needs:
+    - job: build-docker-image
+  when: on_success
+
+scanning_results:
+  stage: test
+  before_script:
+    - export http_proxy=http://server-proxy.corproot.net:8080
+    - export https_proxy=http://server-proxy.corproot.net:8080
+    - export no_proxy=127.0.0.1,localhost,corproot.net,swissptt.ch,jira.swisscom.com,artifactory.swisscom.com,bin.swisscom.com,git.swisscom.com,dev-scapp-corp.swisscom.com,*.dev-scapp-corp.swisscom.com,dev-scapp-console.swisscom.com,*.dev-scapp-console.swisscom.com,scapp-corp.swisscom.com,*.scapp-corp.swisscom.com,scapp-console.swisscom.com,*.scapp-console.swisscom.com,svc.cluster.local,sccloudres.net
+    - apt update && apt -y install jq
+  script:
+    # Use a simple jq command to check vulnerabilities in the previous JSON report
+    - bash tests/scanning_result.sh
+  needs:
+    - job: container_scanning
+  # Comment if you want job to ignore if there are vulnerabilities
+  allow_failure: false
+
+unit-tests:
+  stage: test
+  image: ${DOCKER_IMAGE_NAME}:${CI_COMMIT_SHORT_SHA}
+  script:
+    - coverage run -m pytest
+    - coverage report -m
+    - coverage xml
+  coverage: '/(?i)total.*? (100(?:\.0+)?\%|[1-9]?\d(?:\.\d+)?\%)$/'
+  needs:
+    - job: build-docker-image
+  when: on_success
+  artifacts:
+    reports:
+      coverage_report:
+        coverage_format: cobertura
+        path: coverage.xml
+  allow_failure: false
+
+clean-temporary-docker-images:
+  stage: clean
+  image:
+    name: sema-5gc-docker-local.artifactory.swisscom.com/kaniko-crane-container:latest
+    entrypoint: [ '' ]
+  script:
+    - crane auth login -u "${CI_REGISTRY_USER}" -p "${CI_REGISTRY_PASSWORD}" "${CI_REGISTRY}"
+    - crane delete ${DOCKER_IMAGE_NAME}:${CI_COMMIT_SHORT_SHA}
+    - echo "Temporary image ${DOCKER_IMAGE_NAME} Successfully deleted"
+  needs:
+    - job: scanning_results
+      optional: true
+    - job: unit-tests
+      optional: true
+  when: on_failure
+
+# Release
+# -----
+retag-docker-image:
+  stage: release
+  image:
+    name: sema-5gc-docker-local.artifactory.swisscom.com/kaniko-crane-container:latest
+    entrypoint: ['']
+  script:
+    - crane tag ${DOCKER_IMAGE_NAME}:${CI_COMMIT_SHORT_SHA} latest
+    - echo "Image pushed successfully to ${DOCKER_IMAGE_NAME}:latest"
+  needs:
+    - job: scanning_results
+    - job: unit-tests
+  when: on_success
+

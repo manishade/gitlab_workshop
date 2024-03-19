@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<config>
+    <epg>
+        <pgw>
+            <apn>
+                <name>gprs-test.swisscom.ch</name>
+                <name-server>
+                    <name>222.60.32.193</name>
+                    <priority>20</priority>
+                </name-server>
+                <name-server>
+                    <name>99.134.125.44</name>
+                    <priority>10</priority>
+                </name-server>
+                <user-category>
+                    <default>
+                        <rule-space>
+                            <default>RS-EVENT-PROD</default>
+                        </rule-space>
+                        <policy-control-dynamic-gx-profile>Gx-PCRF</policy-control-dynamic-gx-profile>
+                    </default>
+                </user-category>
+                <routing-instance>SGI</routing-instance>
+                <pdp-context>
+                    <creation>unblocked</creation>
+                    <pdp-type>ipv4</pdp-type>
+                    <address-allocation>shared-ip-pool</address-allocation>
+                    <shared-ip-pool>ipp_gprs</shared-ip-pool>
+                    <limit>500000</limit>
+                    <alarm-limit>80</alarm-limit>
+                </pdp-context>
+                <allow-rule-space>RS-EVENT-PROD</allow-rule-space>
+            </apn>
+        </pgw>
+    </epg>
+</config>
